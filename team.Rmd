@@ -1,0 +1,205 @@
+---
+title: "team.Rmd"
+author: "Elisabeth Balke"
+date: "10/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part one: Cleaning data
+Although the three Excel sheets are loaded into R, they are not useful before some cleaning. Manipulate the three imported data frames, so that in the cleaned dataset: 
+
+1. The player names and opponent names are factors.
+```{r}
+library(readxl)
+library(ggplot2)
+library(dplyr)
+defense <- read_excel('cyclonesFootball2019.xlsx', sheet='Defensive')
+str(defense)
+
+offensive <- read_excel('cyclonesFootball2019.xlsx', sheet='Offensive')
+str(offensive)
+
+biography <- read_excel('cyclonesFootball2019.xlsx', sheet='Biography')
+str(biography)
+
+#1
+defense$Name <- as.factor(defense$Name)
+defense$Opponent_Opponent <- as.factor(defense$Opponent_Opponent)
+
+offensive$Name <- as.factor(offensive$Name)
+offensive$Opponent_Opponent <- as.factor(offensive$Opponent_Opponent)
+
+biography$Name <- as.factor(biography$Name)
+```
+2. All offensive and defensive statistics are numerical. The `Weight` column in biogrpahy is also numeric. (Optional: Learn to mutate multiple columns systematically using the `?across` function in `dplyr)
+```{r}
+defClean <- defense %>%
+  mutate_at(vars(Tackles_Solo,Tackles_ASST,Tackles_TFL,Tackles_Sack,Turnover_FF,Turnover_FR,Turnover_INT,Pass_QBH,Pass_PB), funs(as.numeric))
+
+offClean <- offensive %>%
+  mutate_at(vars(Receiving_REC,Receiving_YDS,Receiving_TD,Rushing_ATT,Rushing_YDS,Rushing_TD,'Passing_CMP-ATT',Passing_YDS,Passing_TD,Passing_INT), funs(as.numeric))
+
+
+```
+3. Change the `Height` column in biogrpahy into numeric. (Hint: Use a unit that works well)
+By cleaning the three data frames in R, at the end of this step you should have the following three clean data frames: `defClean`, `offClean`, and `bioClean`. Print the structures of these data frames.
+```{r}
+bioClean <- biography %>%
+  mutate(Height = as.numeric(Height))
+
+str(defClean)
+str(offClean)
+str(bioClean)
+```
+## Part two: Tidying
+For the following questions, work on the cleaned data frames `defClean`, `offClean`, and `bioClean`.
+1. Reformat the `defClean` data frame into a tidy format using `pivot_longer`. The type of statistic (Tackles_Solo, Tackles_ASST, etc) is added as a new key column named `stat`. 
+```{r}
+defCleanlonger <- defClean %>%
+  pivot_longer(c(-Name,-Opponent_Opponent), names_to='stat',values_to='value')
+```
+2. Compare the distributions of the defensive statistics. What defensive skills are rare?
+```{r}
+#Numerical
+defCleanlonger %>%
+  group_by(stat) %>%
+  summarise(statistics = sum(value)) %>%
+  arrange(statistics)
+
+#Graphical
+ggplot(defCleanlonger, aes(stat, value)) + geom_boxplot()
+
+#Turnover_INT seems to be the most rare defensive stat.
+
+```
+3. Did ISU have better defense against Iowa or Notre Dame? Answer this question by creating a scatterplot with x- and y-axes being the number of solo tackles (of each player). A large number of solo tackles is an indicator of good defense. 
+  Now turn our attention to the player biography.
+```{r}
+defISUxNDxIA <- defCleanlonger %>% 
+  filter(stat=='Tackles_Solo' & Opponent_Opponent %in% c('Notre Dame', 'Iowa')) %>%
+  pivot_wider(names_from = Opponent_Opponent, values_from = value)
+dat %>% ggplot(aes(x=Iowa, y=`Notre Dame`)) + geom_point()
+
+#It appears defense did better in the Notre Dame game. There is a greater frequency of these tackles at higher numbers here. 
+
+```
+4. Separate the `Hometown` column into two columns, namely the city and the state. Print the first few rows of these two columns. (Hint: look at the `sep=` argument of `separate`)
+```{r}
+bioClean <- bioClean %>% separate(Hometown, c('City', 'State'), sep=', ')
+head(bioClean)
+```
+5. How many players are there from each state?
+```{r}
+PlayerHome <- bioClean %>%
+  group_by(State) %>%
+  summarize(count=n()) %>%
+  arrange(count)
+
+print(PlayerHome)
+```
+
+## Part three: Joining data frames
+
+2. Find which states do the ISU defensive and offensive players come from. Create an appropriate summary.
+```{r}
+#1 Question is unclear, as this question can be answered by Part Two #5. 
+print(PlayerHome)
+
+#Separated into Def and Off:
+defHome <- defClean %>%
+  select(Name) %>%
+  group_by(Name)%>%
+  distinct() %>%
+  left_join(bioClean, by = "Name")
+
+defHome <- defHome %>%
+  group_by(State) %>%
+  summarize(count=n()) %>%
+  arrange(count)
+
+offHome <- offClean %>%
+  select(Name) %>%
+  group_by(Name)%>%
+  distinct() %>%
+  left_join(bioClean, by = "Name")
+
+offHome <- defHome %>%
+  group_by(State) %>%
+  summarize(count=n()) %>%
+  arrange(count)
+
+print(defHome)
+print(offHome)
+```
+2. How does the performance of quarterback Brock Purdy relate to the performance of the ISU team?
+```{r}
+dat2 <- offClean %>%
+  group_by(Opponent_Opponent)%>%
+  summarise(Rushing_YDS = sum(Rushing_YDS, na.rm = TRUE), Rushing_TD = sum(Rushing_TD, na.rm = TRUE))
+datPurdy <- offClean %>%
+  filter(Name == 'Purdy, Brock') %>%
+  select(Opponent_Opponent, Passing_YDS)
+
+datPurdyxTeam <- dat2 %>%
+  left_join(datPurdy)
+
+print(datPurdyxTeam)
+
+ggplot(datPurdyxTeam, aes(x = Passing_YDS, Rushing_YDS, shape = factor(Rushing_TD))) + geom_point(na.rm=TRUE)
+
+#As passing yards increase, so do rushing yards. A positive correlation between Purdy's performance (passing) and the teams' (rushing).
+```
+
+3. Which ISU player(s) made big progress over the last year? Compare the 2019 and the 2018 data [here](../slides/cyclonesFootball2018.xlsx). 
+```{r}
+defense2 <- read_excel('cyclonesFootball2018.xlsx', sheet='Defensive')
+str(defense2)
+
+offensive2 <- read_excel('cyclonesFootball2018.xlsx', sheet='Offensive')
+str(offensive2)
+
+biography2 <- read_excel('cyclonesFootball2018.xlsx', sheet='Biography')
+str(biography2)
+
+defense2$Name <- as.factor(defense2$Name)
+defense2$Opponent_Opponent <- as.factor(defense2$Opponent_Opponent)
+
+offensive2$Name <- as.factor(offensive2$Name)
+offensive2$Opponent_Opponent <- as.factor(offensive2$Opponent_Opponent)
+
+biography2$Name <- as.factor(biography2$Name)
+
+defClean2 <- defense2 %>%
+  mutate_at(vars(Tackles_Solo,Tackles_ASST,Tackles_TFL,Tackles_Sack,Turnover_FF,Turnover_FR,Turnover_INT,Pass_QBH,Pass_PB), funs(as.numeric))
+
+offClean2 <- offensive2 %>%
+  mutate_at( vars(Receiving_REC,Receiving_YDS,Receiving_TD,Rushing_ATT,Rushing_YDS,Rushing_TD,'Passing_CMP-ATT',Passing_YDS,Passing_TD,Passing_INT), funs(as.numeric))
+
+bioClean2 <- biography2 %>%
+  mutate(Height = as.numeric(Height))
+
+#Join
+dat2 <- offClean %>%
+  group_by(Name)%>%
+  summarise(Rushing_YDS = sum(Rushing_YDS, na.rm = TRUE), Rushing_TD = sum(Rushing_TD, na.rm = TRUE))
+dat2 <- dat2 %>%
+  mutate(year=2019)
+
+dat3 <- offClean2 %>%
+  group_by(Name)%>%
+  summarise(Rushing_YDS = sum(Rushing_YDS, na.rm = TRUE), Rushing_TD = sum(Rushing_TD, na.rm = TRUE))
+dat3 <- dat3%>%
+  mutate(year=2018)
+
+Comparison <- dat2 %>%
+  full_join(dat3)%>%
+arrange(Comparison)
+
+ggplot(Comparison, aes(Name, Rushing_TD, shape = factor(year))) + geom_point()
+
+```
+
